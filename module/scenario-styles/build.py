@@ -92,10 +92,11 @@ def load_scenarios():
     return out
 
 
-def arc_svg(rows, length):
-    """Арка (Секунды | Накал | Шаг | Что сказать) → кривая накала с подписью каждого шага."""
+def arc_svg(rows, length, compact=False):
+    """Арка (Секунды | Накал | Шаг | Что сказать) → кривая накала с подписью каждого шага.
+    compact — для телефона: узкая, на точках номера шагов, сами шаги — списком под графиком."""
     pts = [(float(r[0]), float(r[1]), r[2], r[3] if len(r) > 3 else '') for r in rows[1:]]
-    W, Hh, L, R, T, B = 760, 300, 30, 24, 52, 74
+    W, Hh, L, R, T, B = (340, 230, 14, 14, 34, 52) if compact else (760, 300, 30, 24, 52, 74)
     nums = re.findall(r'\d+', length)
     end = max(pts[-1][0] + 6, float(nums[-1]) if nums else 0)
     x = lambda s: L + s / end * (W - L - R)
@@ -109,7 +110,7 @@ def arc_svg(rows, length):
     out = [f'<svg class="arc" viewBox="0 0 {W} {Hh - B + 34}" role="img" aria-label="Арка накала по секундам">',
            f'<path d="{d} L{x(end):.1f},{base:.1f} L{x(0):.1f},{base:.1f}Z" class="arc-fill"/><path d="{d}" class="arc-line"/>',
            f'<line x1="{L}" y1="{base:.1f}" x2="{W - R}" y2="{base:.1f}" class="arc-axis"/>']
-    step = 5 if end <= 30 else 10 if end <= 60 else 15
+    step = (10 if end <= 30 else 20 if end <= 60 else 30) if compact else (5 if end <= 30 else 10 if end <= 60 else 15)
     for s in range(0, int(end) + 1, step):
         out.append(f'<text x="{x(s):.1f}" y="{base + 20:.1f}" class="arc-tick" text-anchor="middle">{s} с</text>')
     placed = []                                        # занятые подписями прямоугольники (x0, x1, y0, y1)
@@ -118,16 +119,21 @@ def arc_svg(rows, length):
         nxt = pts[i + 1][1] if i + 1 < len(pts) else v - 1
         up = v >= (prev + nxt) / 2                     # вершина — подпись сверху, впадина — снизу
         peak = v >= 90
-        anchor = 'start' if i == 0 else 'end' if i == len(pts) - 1 else 'middle'
-        w = len(name) * 8 + 10                         # ширина подписи на глаз
+        label = str(i + 1) if compact else name
+        anchor = 'middle' if compact else 'start' if i == 0 else 'end' if i == len(pts) - 1 else 'middle'
+        w = len(label) * 8 + (6 if compact else 10)    # ширина подписи на глаз
         x0 = x(s) if anchor == 'start' else x(s) - w if anchor == 'end' else x(s) - w / 2
         free = lambda ty: all(x0 + w <= a or b <= x0 or ty + 4 <= c or d <= ty - 13 for a, b, c, d in placed)
         ty = next((t for t in (y(v) - 14 - k * 17 if up else y(v) + 24 + k * 17 for k in range(5)) if free(t)), y(v) - 14)
         placed.append((x0, x0 + w, ty - 13, ty + 4))
         out.append(f'<g><title>{H.escape(name)} — {H.escape(what)}</title>'
                    f'<circle cx="{x(s):.1f}" cy="{y(v):.1f}" r="{6 if peak else 4.5}" class="{"arc-pk" if peak else "arc-dot"}"/>'
-                   f'<text x="{x(s):.1f}" y="{ty:.1f}" class="arc-lbl{" pk" if peak else ""}" text-anchor="{anchor}">{H.escape(name)}</text></g>')
+                   f'<text x="{x(s):.1f}" y="{ty:.1f}" class="arc-lbl{" pk" if peak else ""}{" num" if compact else ""}" text-anchor="{anchor}">{H.escape(label)}</text></g>')
     out.append('</svg>')
+    if compact:
+        out.append('<ol class="arc-legend">' + ''.join(
+            f'<li{" class=pk" if v >= 90 else ""}><b>{i + 1}</b><span>{s:g} с</span>{H.escape(name)}</li>'
+            for i, (s, v, name, _) in enumerate(pts)) + '</ol>')
     return ''.join(out)
 
 
@@ -175,16 +181,17 @@ def style_html(s, variant):
     <div><div class="h">Когда брать</div><ul class="dots">{when}</ul></div>
   </div>
   <div class="h">Арка сценария</div>
-  <div class="arc-box"><div class="arc-hint">← арку можно листать вбок →</div><div class="arc-scroll">{arc_svg(sec["Арка"]["rows"], m["длина"])}</div>
+  <div class="arc-box"><div class="arc-wide">{arc_svg(sec["Арка"]["rows"], m["длина"])}</div>
+    <div class="arc-narrow">{arc_svg(sec["Арка"]["rows"], m["длина"], compact=True)}</div>
     <p class="arc-cap">По горизонтали — секунды ролика, по вертикали — накал: насколько зрителя держит. Яркие точки — пики, ради них досматривают.</p></div>
-  <div class="h">Шаги <small>заготовку можно скопировать нажатием</small></div>
-  <ol class="steps">{"".join(steps)}</ol>
-  <div class="h">Пример сценария</div>
+  <details class="fold" open><summary class="h">Шаги <small>заготовку можно скопировать нажатием</small></summary>
+  <ol class="steps">{"".join(steps)}</ol></details>
+  <details class="fold" open><summary class="h">Пример сценария</summary>
   <p class="ex-lead">{inline(" ".join(ex["para"]))}</p>
   <div class="ex"><div class="ex-row ex-hd"><span>Время</span><p>Говорю</p><p>В кадре</p></div>{ex_rows(ex["rows"][1:])}</div>
-  <p class="ex-count">{words} слов</p>
-  <div class="h">Правила стиля</div>
-  <ul class="dots rules">{rules}</ul>
+  <p class="ex-count">{words} слов</p></details>
+  <details class="fold" open><summary class="h">Правила стиля</summary>
+  <ul class="dots rules">{rules}</ul></details>
   <button class="top" type="button">↑ Ко всем стилям</button>
 </section>'''
 
@@ -282,10 +289,46 @@ CSS = """
 .scs .dots li{padding-left:18px;position:relative}
 .scs .dots li::before{content:'';position:absolute;left:0;top:.6em;width:7px;height:7px;background:var(--scs-accent)}
 .scs .arc-box{background:var(--scs-card);border:1px solid var(--scs-line);border-radius:var(--scs-r);padding:16px 16px 12px}
-.scs .arc-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
-.scs .arc{display:block;width:100%;min-width:560px;height:auto}
-.scs .arc-hint{display:none;font-size:12px;font-weight:700;color:var(--scs-accent);margin-bottom:6px}
-@media (max-width:600px){.scs .arc-hint{display:block}}
+.scs .arc{display:block;width:100%;height:auto}
+.scs .arc-narrow{display:none}
+.scs .arc-lbl.num{font-size:13px;font-weight:800}
+.scs .arc-legend{list-style:none;display:grid;gap:4px;margin-top:10px;font-size:14px}
+.scs .arc-legend li{display:flex;gap:8px;align-items:baseline}
+.scs .arc-legend b{flex:none;width:22px;height:22px;border-radius:50%;display:grid;place-items:center;font-size:12px;border:2px solid var(--scs-accent);color:var(--scs-accent)}
+.scs .arc-legend li.pk b{background:var(--scs-accent);color:var(--scs-on-accent)}
+.scs .arc-legend span{flex:none;width:40px;color:var(--scs-mut);font-size:13px}
+.scs .fold>summary{cursor:pointer;list-style:none}
+.scs .fold>summary::-webkit-details-marker{display:none}
+.scs .fold>summary::after{content:'';width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:rotate(45deg);margin-left:auto;align-self:center;transition:transform .15s}
+.scs .fold[open]>summary::after{transform:rotate(-135deg)}
+.scs .to-dl{display:inline-block;margin-top:14px;font-size:15px;font-weight:700;color:var(--scs-accent);background:none;border:0;padding:0;font-family:inherit;cursor:pointer;text-align:left}
+@media (max-width:600px){
+  .scs .wrap{padding-top:32px}
+  .scs .arc-wide{display:none}.scs .arc-narrow{display:block}
+  .scs .arc-box{padding:12px 12px 10px}
+  .scs .filter{flex-wrap:nowrap;overflow-x:auto;margin:32px -16px 14px;padding:0 16px 4px;scrollbar-width:none}
+  .scs .filter::-webkit-scrollbar{display:none}
+  .scs .filter button{flex:none}
+  .scs .cards{gap:8px}
+  .scs .card{display:grid;grid-template-columns:auto 1fr;column-gap:12px;align-items:center;padding:12px 14px}
+  .scs .c-n{grid-row:span 2;font-size:24px}
+  .scs .card b{font-size:16px}
+  .scs .c-sch{display:none}
+  .scs .st{margin-top:48px;padding-top:28px}
+  .scs .st-head{gap:12px}
+  .scs .scheme span{font-size:13px;padding:4px 9px}
+  .scs .scheme span+span::before{margin-right:5px}
+  .scs .ask{padding:2px 14px 14px}
+  .scs .ask-ok{display:none;margin:8px 0 0}
+  .scs .ask-ok.on{display:block}
+  .scs .ask-btn{width:100%}
+  .scs .how div{padding:12px;font-size:13px}
+  .scs .fold>summary.h{margin:24px 0 10px;padding:12px 14px;border:1px solid var(--scs-line);border-radius:var(--scs-r);background:var(--scs-card)}
+  .scs .fold[open]>summary.h{margin-bottom:12px}
+  .scs .fold+.fold>summary.h{margin-top:10px}
+  .scs .fold>summary.h small{display:none}
+  .scs .steps li{padding:12px}
+}
 .scs .arc-fill{fill:var(--scs-fill)}
 .scs .arc-line{fill:none;stroke:var(--scs-accent);stroke-width:3;stroke-linecap:round}
 .scs .arc-axis{stroke:var(--scs-line);stroke-width:1.5}
@@ -375,7 +418,9 @@ root.querySelectorAll('.ask-btn').forEach(b => b.addEventListener('click', () =>
   }
   copy(text, () => { ok.classList.add('on'); setTimeout(() => ok.classList.remove('on'), 2500); });
 }));
+if (matchMedia('(max-width:600px)').matches) root.querySelectorAll('.fold').forEach(d => d.open = false);   // на телефоне шаги, пример и правила свёрнуты
 const go = el => el && el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+root.querySelectorAll('.to-dl').forEach(b => b.addEventListener('click', () => go(root.querySelector('.dl'))));
 root.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => go(root.querySelector(`.st[data-id="${b.dataset.go}"]`))));
 root.querySelectorAll('.top').forEach(b => b.addEventListener('click', () => go(root.querySelector('.filter'))));
 root.querySelectorAll('.filter button').forEach(b => b.addEventListener('click', () => {
@@ -418,7 +463,7 @@ def body_html(styles, variant, scenarios=()):
     return f'''<div class="wrap">
 <div class="eyebrow">{EYEBROW[variant]}</div>
 <h1>12 стилей сценариев</h1>
-<p class="lead">{lead}</p>
+<p class="lead">{lead}</p>{'<button class="to-dl" type="button">↓ Проект для Claude и Codex, раздел для портала</button>' if variant == 'site' else ''}
 <div class="how">
   <div><b>Что это за стиль</b>Суть и когда его брать</div>
   <div><b>Арка</b>Где в ролике пики и спады внимания — по секундам</div>
